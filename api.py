@@ -89,21 +89,89 @@ def run_tts(
     logging.info("Starting TTS inference...")
 
     try:
-        # IndexTTS只需要音频提示文件，其他参数暂时忽略
+        # 如果没有提供参考音频，使用默认的参考音频路径
         if prompt_speech_path is None:
-            # 如果没有提供参考音频，创建一个默认的参考音频路径
             default_prompt = os.path.join("tests", "sample_prompt.wav")
             if os.path.exists(default_prompt):
                 prompt_speech_path = default_prompt
             else:
                 raise ValueError("No prompt audio provided and no default prompt audio found")
         
-        # 使用IndexTTS进行推理
+        # 准备generation参数来控制语音特性
+        generation_kwargs = {}
+        
+        # 语速控制 (通过调节temperature和repetition_penalty)
+        if speed is not None:
+            speed_val = int(speed)
+            if speed_val == 1:  # 最慢
+                generation_kwargs.update({
+                    "temperature": 0.6,
+                    "repetition_penalty": 8.0,
+                    "max_mel_tokens": 800  # 允许更长的音频
+                })
+            elif speed_val == 2:  # 慢
+                generation_kwargs.update({
+                    "temperature": 0.8,
+                    "repetition_penalty": 9.0,
+                    "max_mel_tokens": 700
+                })
+            elif speed_val == 3:  # 正常
+                generation_kwargs.update({
+                    "temperature": 1.0,
+                    "repetition_penalty": 10.0,
+                    "max_mel_tokens": 600
+                })
+            elif speed_val == 4:  # 快
+                generation_kwargs.update({
+                    "temperature": 1.2,
+                    "repetition_penalty": 11.0,
+                    "max_mel_tokens": 500
+                })
+            elif speed_val == 5:  # 最快
+                generation_kwargs.update({
+                    "temperature": 1.4,
+                    "repetition_penalty": 12.0,
+                    "max_mel_tokens": 400
+                })
+        
+        # 音调/语气控制 (通过调节top_p和top_k)
+        if pitch is not None:
+            pitch_val = int(pitch)
+            if pitch_val == 1:  # 最低音调
+                generation_kwargs.update({
+                    "top_p": 0.6,
+                    "top_k": 20
+                })
+            elif pitch_val == 2:  # 低音调
+                generation_kwargs.update({
+                    "top_p": 0.7,
+                    "top_k": 25
+                })
+            elif pitch_val == 3:  # 正常音调
+                generation_kwargs.update({
+                    "top_p": 0.8,
+                    "top_k": 30
+                })
+            elif pitch_val == 4:  # 高音调
+                generation_kwargs.update({
+                    "top_p": 0.9,
+                    "top_k": 35
+                })
+            elif pitch_val == 5:  # 最高音调
+                generation_kwargs.update({
+                    "top_p": 0.95,
+                    "top_k": 40
+                })
+        
+        logging.info(f"Using generation parameters: {generation_kwargs}")
+        
+        # 使用IndexTTS进行推理，传递generation参数
         output_path = model.infer(
             audio_prompt=prompt_speech_path,
             text=text,
             output_path=save_path,
-            verbose=True
+            verbose=True,
+            **generation_kwargs
         )
         logging.info(f"Audio saved at: {output_path}")
         return output_path
@@ -204,7 +272,12 @@ async def api_create_voice(
     Supports idempotency via idempotency_key.
     Returns the generated WAV audio file.
     
-    Note: IndexTTS使用参考音频控制音色，gender/pitch/speed参数暂时忽略
+    Args:
+        text: 要合成的文本
+        gender: 性别 ("male" 或 "female") - 暂时忽略，通过参考音频控制
+        pitch: 音调/语气 (1=最低, 5=最高) - 通过调节生成参数实现
+        speed: 语速 (1=最慢, 5=最快) - 通过调节生成参数实现
+        idempotency_key: 幂等性键，相同的键会返回缓存结果
     """
     global idempotency_cache # Ensure we can modify the global cache
 
@@ -230,7 +303,7 @@ async def api_create_voice(
         raise HTTPException(status_code=400, detail="Invalid speed. Choose an integer between 1 and 5.")
 
     try:
-        # IndexTTS目前忽略这些参数，主要通过参考音频控制
+        # 使用IndexTTS进行推理，现在支持语速和音调调节
         audio_output_path = run_tts(
             text=text,
             model=model_tts,
@@ -257,9 +330,9 @@ async def api_clone_voice(
     prompt_text: Optional[str] = Form(None),      # Text of the prompt audio (optional)
     idempotency_key: Optional[str] = Form(None),
     # Optional parameters for customization
-    gender: Optional[str] = Form(None),      # 'male' or 'female' (暂时忽略)
-    pitch: Optional[int] = Form(None),       # 1-5 (暂时忽略)
-    speed: Optional[int] = Form(None)        # 1-5 (暂时忽略)
+    gender: Optional[str] = Form(None),      # 'male' or 'female' (暂时忽略，通过参考音频控制)
+    pitch: Optional[int] = Form(None),       # 1-5 (现已支持)
+    speed: Optional[int] = Form(None)        # 1-5 (现已支持)
 ):
     """
     Clone voice using text and a prompt audio file. Optionally customize the output voice.
@@ -269,9 +342,9 @@ async def api_clone_voice(
         prompt_audio (UploadFile): The reference audio file for voice cloning.
         prompt_text (Optional[str], optional): Text content of the prompt audio. Defaults to None.
         idempotency_key (Optional[str], optional): A unique key to ensure idempotency. Defaults to None.
-        gender (Optional[str], optional): Gender parameter (暂时忽略). Defaults to None.
-        pitch (Optional[int], optional): Pitch parameter (暂时忽略). Defaults to None.
-        speed (Optional[int], optional): Speed parameter (暂时忽略). Defaults to None.
+        gender (Optional[str], optional): Gender parameter (暂时忽略，通过参考音频控制). Defaults to None.
+        pitch (Optional[int], optional): Pitch parameter (1=最低, 5=最高) - 现已支持. Defaults to None.
+        speed (Optional[int], optional): Speed parameter (1=最慢, 5=最快) - 现已支持. Defaults to None.
 
     Returns:
         FileResponse: The generated WAV audio file.
@@ -318,7 +391,7 @@ async def api_clone_voice(
             model=model_tts,
             prompt_text=prompt_text,
             prompt_speech_path=temp_prompt_path,
-            # Pass customization parameters (目前暂时忽略)
+            # 传递定制化参数，现在支持语速和音调调节
             gender=gender,
             pitch=str(pitch) if pitch is not None else None,
             speed=str(speed) if speed is not None else None,

@@ -76,6 +76,37 @@ def test_tts_clone():
     finally:
         files["prompt_audio"][1].close()
 
+def test_tts_speed_pitch():
+    """测试语速和音调调节功能"""
+    print("\nTesting speed and pitch control...")
+    
+    base_text = "这是语速和音调测试："
+    test_cases = [
+        {"name": "最慢最低音", "speed": 1, "pitch": 1, "text": base_text + "最慢最低音"},
+        {"name": "正常", "speed": 3, "pitch": 3, "text": base_text + "正常语速音调"},
+        {"name": "最快最高音", "speed": 5, "pitch": 5, "text": base_text + "最快最高音"},
+    ]
+    
+    for i, case in enumerate(test_cases):
+        print(f"  Testing {case['name']}...")
+        data = {
+            "text": case["text"],
+            "gender": "female",
+            "pitch": case["pitch"],
+            "speed": case["speed"],
+            "idempotency_key": f"test_speed_pitch_{i}"
+        }
+        
+        response = requests.post("http://localhost:8080/tts/create", data=data)
+        
+        if response.status_code == 200:
+            output_path = f"test_{case['name'].replace(' ', '_')}_output.wav"
+            with open(output_path, "wb") as f:
+                f.write(response.content)
+            print(f"    ✓ {case['name']} test passed, saved to {output_path}")
+        else:
+            print(f"    ✗ {case['name']} test failed:", response.status_code)
+
 def main():
     """运行所有测试"""
     print("IndexTTS API 测试脚本")
@@ -92,6 +123,7 @@ def main():
     test_hello()
     test_tts_create()
     test_tts_clone()
+    test_tts_speed_pitch()
     
     print("\n测试完成！")
 
